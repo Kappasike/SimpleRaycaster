@@ -101,6 +101,8 @@ static inline void draw_column(int x1, int x2, int height, uint32_t color)
 
 void render()
 {
+    const float player_x = cosf(player.dir);
+    const float player_y = sinf(player.dir);
     for(int x=0; x<RENDER_SCREEN_WIDTH; x++)
     {
         uint8_t map_x = (int)player.x;
@@ -114,8 +116,8 @@ void render()
         // just getting the ray angle and separating it into it's
         // x and y component
         const float camera_pos = 2 * x / (float)(RENDER_SCREEN_WIDTH) - 1;
-        const float ray_angle_x = cosf(player.dir) + player.plane_x*camera_pos;
-        const float ray_angle_y = sin(player.dir) + player.plane_y*camera_pos;
+        const float ray_angle_x = player_x + player.plane_x*camera_pos;
+        const float ray_angle_y = player_y + player.plane_y*camera_pos;
 
         // how long of a distance is needed to go from the current tile to the next tile
         // using the ray angle, look up DDA for a concise explanation
