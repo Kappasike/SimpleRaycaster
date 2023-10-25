@@ -8,29 +8,19 @@
 #define SCREEN_HEIGHT 320
 
 /*** THE SIMULATED RESOLUTION ***/
-#define RES_X 13
-#define RES_Y 8
+#define RES_X 520
+#define RES_Y 320
+
+#define ROT_SPEED 0.14
+#define MOVEMENT_SPEED 0.06
+
+#define MAP_WIDTH 8
+#define MAP_HEIGHT 8
 
 const uint16_t RENDER_RES_X = SCREEN_WIDTH / RES_X;
 const uint16_t RENDER_RES_Y = SCREEN_HEIGHT / RES_Y;
 
-#define TILE_PX 64
-
-#define MAP_WIDTH 8
-#define MAP_HEIGHT 8
-// 13 x 8
-#define FOV 75
-const float FOV_HALF_RAD = (FOV/2.f)*0.0174533;
-
-const float TWO_PI = M_PI*2;
-const float P2 = M_PI/2.f;
-const float P3 = 3.f*M_PI/2.f;
-const float DEG = ((FOV*0.0174533)/SCREEN_WIDTH)*RENDER_RES_X;
-
-const float yaw_speed = 3.f * .02f;
-const float movement_speed = 3.f * .02f;
-
-const uint16_t x_iterations = SCREEN_WIDTH/RENDER_RES_X;
+const uint16_t RENDER_SCREEN_WIDTH = SCREEN_WIDTH/RENDER_RES_X;
 
 static uint8_t MAP[MAP_WIDTH*MAP_HEIGHT] = {
     1, 1, 1, 1, 1, 1, 1, 1,
@@ -47,6 +37,8 @@ struct {
     float x;
     float y;
     float dir;
+    float plane_x;
+    float plane_y; 
 } player;
 
 struct {
@@ -55,6 +47,11 @@ struct {
     SDL_Renderer* renderer;
     uint32_t pixels[SCREEN_WIDTH*SCREEN_HEIGHT]; // array of all pixels
 } state;
+
+static inline uint8_t in_block(float x, float y)
+{
+    return MAP[(int)y*MAP_WIDTH + (int)x];
+}
 
 uint32_t get_color(uint8_t objectType)
 {
@@ -74,62 +71,6 @@ uint32_t get_color(uint8_t objectType)
     return ret_color;
 }
 
-uint32_t get_tinted_color(uint8_t objectType)
-{
-    uint32_t ret_color = 0xFF000000;
-    switch(objectType)
-    {
-        case 1:
-            ret_color = 0xFF0000BA;
-            break;
-        case 2:
-            ret_color = 0xFF00BA00;
-            break;
-        case 3:
-            ret_color = 0xFFBA0000;
-            break;
-    }
-    return ret_color;
-}
-
-/* draw map */
-void test_drawmap()
-{
-    for(int x=0; x<MAP_WIDTH; x++)
-    {
-        for(int y=0; y<MAP_HEIGHT; y++)
-        {
-            SDL_Rect dabbington;
-            dabbington.w = TILE_PX>>2;
-            dabbington.h = TILE_PX>>2;
-            dabbington.x = x*(TILE_PX>>2);
-            dabbington.y = y*(TILE_PX>>2);
-            if(MAP[y*MAP_WIDTH+x]==0)
-            {
-                SDL_SetRenderDrawColor(state.renderer, 30, 30, 30, 255);
-            }
-            else if(MAP[y*MAP_WIDTH+x]>=1)
-            {
-                SDL_SetRenderDrawColor(state.renderer, 0, 255, 0, 255);
-            }
-            SDL_RenderFillRect(state.renderer, &dabbington);
-        }
-    }
-}
-
-void test_drawplayer()
-{
-    SDL_SetRenderDrawColor(state.renderer, 255, 0, 0, 255);
-    SDL_Rect cubington_city;
-    cubington_city.h = 10;
-    cubington_city.w = 10;
-    cubington_city.x = ((int)(player.x)-20)>>2;
-    cubington_city.y = ((int)(player.y)-20)>>2;
-    SDL_RenderFillRect(state.renderer, &cubington_city);
-}
-
-/* --- */
-
 float dist_2d(float x1, float x2, float y1, float y2)
 {
     return sqrtf((x2-x1)*(x2-x1)+(y2-y1)*(y2-y1));
@@ -139,18 +80,18 @@ float dist_2d(float x1, float x2, float y1, float y2)
 * x is column on screen, 0 would be far left column
 * h is height of column
 */
-void draw_column(int x, int x2, int height, uint32_t color)
+void draw_column(int x1, int x2, int height, uint32_t color)
 {
-    int og_height = height;
+    int original_height = height;
     height = height / RENDER_RES_Y;
     height = height * RENDER_RES_Y;
-    if(abs(og_height-height)>abs(og_height-(height+RENDER_RES_Y)))
+    if(abs(original_height-height)>abs(original_height-(height+RENDER_RES_Y)))
     {
         height+=RENDER_RES_Y;
     }
     int offset = (SCREEN_HEIGHT>>1)-((height)>>1);
-    for(int i=x; i<x2; i++)
-        {
+    for(int i=x1; i<x2; i++)
+    {
         for(int y=offset; y<offset+height; y++)
         {
             state.pixels[y*SCREEN_WIDTH+i]=color;
@@ -158,149 +99,105 @@ void draw_column(int x, int x2, int height, uint32_t color)
     }
 }
 
-// possibly the greatest raycasting function of all time
-void raycast()
+
+void render()
 {
-    float vx, vy, hx, hy, ray_x, ray_y, x_offset, y_offset, ray_angle, v_angle, h_angle, v_dist, h_dist, lowest_dist;
-    int x, map_x, map_y, map, dof;
-    uint32_t color = 0xFF000000; // will be the final color
-    uint32_t v_color = 0xFF000000; // color if a vertical wall is used
-    uint32_t h_color = 0xFF000000; // color if a horizontal wall is used
-    ray_angle = player.dir - FOV_HALF_RAD;
-    if(ray_angle<0){ray_angle+=TWO_PI;}
-    if(ray_angle>TWO_PI){ray_angle-=TWO_PI;}
-    for(x=0;x<SCREEN_WIDTH/RENDER_RES_X;x++) // increment through each column of pixels
+    for(int x=0; x<RENDER_SCREEN_WIDTH; x++)
     {
-        dof=0;
-        h_dist = 1000000.f;
-        hx = player.x;
-        hy = player.y;
-        v_angle = -1/tan(ray_angle);
-        if(ray_angle>M_PI){
-            ray_y=(((int)player.y>>6)<<6)-0.0001;
-            ray_x=(player.y-ray_y)*v_angle+player.x;
-            y_offset=-TILE_PX;
-            x_offset=-y_offset*v_angle;
-        }
-        else if(ray_angle<M_PI){
-            ray_y=(((int)player.y>>6)<<6)+TILE_PX;
-            ray_x=(player.y-ray_y)*v_angle+player.x;
-            y_offset=TILE_PX;
-            x_offset=-y_offset*v_angle;
-        }
-        else
+        uint8_t map_x = (int)player.x;
+        uint8_t map_y = (int)player.y;
+
+        // these are how far we have to initially go to reach a box
+        // from the current player position for DDA
+        float side_dist_x;
+        float side_dist_y;
+
+        // just getting the ray angle and separating it into it's
+        // x and y component
+        const float camera_pos = 2 * x / (float)(RENDER_SCREEN_WIDTH) - 1;
+        const float ray_angle_x = cosf(player.dir) + player.plane_x*camera_pos;
+        const float ray_angle_y = sin(player.dir) + player.plane_y*camera_pos;
+
+        // how long of a distance is needed to go from the current tile to the next tile
+        // using the ray angle, look up DDA for a concise explanation
+        float delta_dist_x = (ray_angle_x==0) ? 1e13 : fabs(1/ray_angle_x);
+        float delta_dist_y = (ray_angle_y==0) ? 1e13 : fabs(1/ray_angle_y);
+
+        int8_t step_x;
+        int8_t step_y;
+
+        // this represents if we've hit a wall yet
+        uint8_t hit = 0;
+        bool is_side = false;
+
+        if(ray_angle_x<0) // if facing left then the step direction will be left
         {
-            ray_x=player.x;
-            ray_y=player.y;
-            dof=8;
+            step_x = -1;
+            side_dist_x = (player.x - map_x) * delta_dist_x;
         }
-        while(dof<8)
+        else // if not the step direction will be right
         {
-            map_x=(int)(ray_x)>>6;
-            map_y=(int)(ray_y)>>6;
-            map=map_y*MAP_WIDTH+map_x;
-            if(map>0 && map<MAP_WIDTH*MAP_HEIGHT && MAP[map]>=1)
-            {
-                hx = ray_x;
-                hy = ray_y;
-                h_dist = dist_2d(player.x, hx, player.y, hy);
-                h_color = get_tinted_color(MAP[map]);
-                dof=8;
-            }
-            else{
-                ray_x+=x_offset;
-                ray_y+=y_offset;
-                dof++;
-            }
+            step_x = 1;
+            side_dist_x = (map_x + 1.f - player.x) * delta_dist_x;
         }
 
-        /**** Vertical Part ****/
+        if(ray_angle_y<0) // if facing down then the step direction will be down
+        {
+            step_y = -1;
+            side_dist_y = (player.y - map_y) * delta_dist_y;
+        }
+        else // if not the step direction will be up
+        {
+            step_y = 1;
+            side_dist_y = (map_y + 1.f - player.y) * delta_dist_y;
+        }
 
-        dof=0;
-        v_dist = 1000000.f;
-        vx = player.x;
-        vy = player.y;
-        h_angle = -tan(ray_angle);
-        if(ray_angle>P2 && ray_angle<P3){
-            ray_x=(((int)player.x>>6)<<6)-0.0001;
-            ray_y=(player.x-ray_x)*h_angle+player.y;
-            x_offset=-TILE_PX;
-            y_offset=-x_offset*h_angle;
-        }
-        else if(ray_angle<P2 || ray_angle>P3){
-            ray_x=(((int)player.x>>6)<<6)+TILE_PX;
-            ray_y=(player.x-ray_x)*h_angle+player.y;
-            x_offset=TILE_PX;
-            y_offset=-x_offset*h_angle;
-        }
-        else
+        // this is where the DDA algorithm is actually performed
+        while(!hit)
         {
-            ray_x=player.x;
-            ray_y=player.y;
-            dof=8;
-        }
-        while(dof<8)
-        {
-            map_x=(int)(ray_x)>>6; map_y=(int)(ray_y)>>6; map=map_y*MAP_WIDTH+map_x;
-            if(map>0 && map<MAP_WIDTH*MAP_HEIGHT && MAP[map]>=1)
+            if(side_dist_x<side_dist_y)
             {
-                vx = ray_x;
-                vy = ray_y;
-                v_dist = dist_2d(player.x, vx, player.y, vy);
-                v_color = get_color(MAP[map]);
-                dof=8;
+                side_dist_x += delta_dist_x;
+                map_x += step_x;
+                is_side = false;
             }
             else{
-                ray_x+=x_offset; 
-                ray_y+=y_offset; 
-                dof++;
+                side_dist_y += delta_dist_y;
+                map_y += step_y;
+                is_side = true;
             }
+            hit = in_block(map_x, map_y);
         }
-        if(v_dist<h_dist){
-            ray_x=vx;
-            ray_y=vy;
-            lowest_dist=v_dist;
-            color = v_color;
-        }
-        else{
-            ray_x=hx;
-            ray_y=hy;
-            lowest_dist=h_dist;
-            color = h_color;
-        }
-        float ca = player.dir-ray_angle;
-        if(ca<0)
+        uint32_t color = get_color(hit);
+
+        // if it's a side then dim the color to create a shading effect
+        if(is_side)
         {
-            ca+=TWO_PI;
+            color = color & 0xFFA8A8A8;
         }
-        if(ca>TWO_PI)
-        {
-            ca-=TWO_PI;
-        } 
-        lowest_dist=lowest_dist*cos(ca);
-        int height = (TILE_PX*SCREEN_HEIGHT)/lowest_dist;
-        if(height>SCREEN_HEIGHT) height = SCREEN_HEIGHT;
+
+        // wall has been hit
+        float dist_to_wall = (is_side) ? side_dist_y - delta_dist_y : side_dist_x - delta_dist_x;
+
+        uint16_t height = (int)(SCREEN_HEIGHT / dist_to_wall);
+        if(height > SCREEN_HEIGHT) height = SCREEN_HEIGHT;
 
         draw_column(x*RENDER_RES_X, ((x+1)*RENDER_RES_X), height, color);
-
-        ray_angle+=DEG;
-
-        if(ray_angle<0){ray_angle+=TWO_PI;}
-        if(ray_angle>TWO_PI){ray_angle-=TWO_PI;}
     }
 }
 
 int main(int argc, char* args[])
 {
-    player.dir = M_PI/2;
-
-    //im putting my defenses cause i dont wanna fall in love if i ever did that i think id have a heart attack
+    // im putting my defenses cause i dont wanna fall in love if i ever did that i think id have a heart attack
     // attttaaaaaaack i think id have a heart attaaaaaacck i think id have a heart attack
     // there's no one else to blame
     // im flying to close to the sun
     // and i burst into flaaaaaaaaaaaaaaAAAAAAAAAAAAAaaaaaaaames
-    player.x = 256.f;
-    player.y = 256.f;
+    player.x = 4.f;
+    player.y = 4.f;
+    player.dir = -M_PI;
+    player.plane_x = 0.f;
+    player.plane_y = 0.66f;
     
     if(SDL_Init(SDL_INIT_VIDEO)<0)
     {
@@ -357,9 +254,9 @@ int main(int argc, char* args[])
             if(keystate[SDL_SCANCODE_W])
             {
                 // check if the next input would make us inside a block, if so then don't do anything
-                float newX = player.x+cosf(player.dir) * movement_speed*TILE_PX;
-                float newY = player.y+sinf(player.dir) * movement_speed*TILE_PX;
-                if(MAP[((int)(newY)>>6)*MAP_WIDTH+((int)(newX)>>6)] == 0)
+                float newX = player.x+cosf(player.dir) * MOVEMENT_SPEED;
+                float newY = player.y+sinf(player.dir) * MOVEMENT_SPEED;
+                if(in_block(newX, newY) == 0)
                 {
                     player.x = newX;
                     player.y = newY;
@@ -369,9 +266,9 @@ int main(int argc, char* args[])
 
             if(keystate[SDL_SCANCODE_S])
             {
-                float newX = player.x-cosf(player.dir) * movement_speed*TILE_PX;
-                float newY = player.y-sinf(player.dir) * movement_speed*TILE_PX;
-                if(MAP[((int)(newY)>>6)*MAP_WIDTH+((int)(newX)>>6)] == 0)
+                float newX = player.x-cosf(player.dir) * MOVEMENT_SPEED;
+                float newY = player.y-sinf(player.dir) * MOVEMENT_SPEED;
+                if(in_block(newX, newY) == 0)
                 {
                     player.x = newX;
                     player.y = newY;
@@ -380,9 +277,9 @@ int main(int argc, char* args[])
 
             if(keystate[SDL_SCANCODE_D])
             {
-                float newX = player.x+cosf(player.dir+M_PI/2) * movement_speed*TILE_PX;
-                float newY = player.y+sinf(player.dir+M_PI/2) * movement_speed*TILE_PX;
-                if(MAP[((int)(newY)>>6)*MAP_WIDTH+((int)(newX)>>6)] == 0)
+                float newX = player.x-cosf(player.dir+M_PI/2) * MOVEMENT_SPEED;
+                float newY = player.y-sinf(player.dir+M_PI/2) * MOVEMENT_SPEED;
+                if(in_block(newX, newY) == 0)
                 {
                     player.x = newX;
                     player.y = newY;
@@ -391,9 +288,9 @@ int main(int argc, char* args[])
 
             if(keystate[SDL_SCANCODE_A])
             {
-                float newX = player.x-cosf(player.dir+M_PI/2) * movement_speed*TILE_PX;
-                float newY = player.y-sinf(player.dir+M_PI/2) * movement_speed*TILE_PX;
-                if(MAP[((int)(newY)>>6)*MAP_WIDTH+((int)(newX)>>6)] == 0)
+                float newX = player.x+cosf(player.dir+M_PI/2) * MOVEMENT_SPEED;
+                float newY = player.y+sinf(player.dir+M_PI/2) * MOVEMENT_SPEED;
+                if(in_block(newX, newY) == 0)
                 {
                     player.x = newX;
                     player.y = newY;
@@ -403,30 +300,27 @@ int main(int argc, char* args[])
             if(keystate[SDL_SCANCODE_Q])
             {
                 // i didnt choose this town
-                player.dir -= .08f;
-                if(player.dir<0)
-                {
-                    player.dir+=TWO_PI;
-                }
+                player.dir += ROT_SPEED;
+                float new_plane_x = player.plane_x * cosf(ROT_SPEED) - player.plane_y * sinf(ROT_SPEED);
+                float new_plane_y = player.plane_x * sinf(ROT_SPEED) + player.plane_y * cosf(ROT_SPEED);
+                player.plane_x = new_plane_x;
+                player.plane_y = new_plane_y;
             }
 
             if(keystate[SDL_SCANCODE_E])
             {
                 // i dream of getting out
-                player.dir += .08f;
-                if(player.dir>TWO_PI)
-                {
-                    player.dir-=TWO_PI;
-                }
+                player.dir -= ROT_SPEED;
+                float new_plane_x = player.plane_x * cosf(-ROT_SPEED) - player.plane_y * sinf(-ROT_SPEED);
+                float new_plane_y = player.plane_x * sinf(-ROT_SPEED) + player.plane_y * cosf(-ROT_SPEED);
+                player.plane_x = new_plane_x;
+                player.plane_y = new_plane_y;
             }
 
-
-            memset(state.pixels, 0xFFa8a8a8, sizeof(state.pixels)); // set all the pixels back to black
-            raycast();
+            memset(state.pixels, 0xFFa8a8a8, sizeof(state.pixels));
+            render();
             SDL_UpdateTexture(state.texture, NULL, state.pixels, SCREEN_WIDTH*4);
             SDL_RenderCopyEx(state.renderer, state.texture, NULL, NULL, 0.0, NULL, SDL_FLIP_VERTICAL);
-            //test_drawmap();
-            //test_drawplayer();
             SDL_RenderPresent(state.renderer);
         }
     }
