@@ -53,7 +53,7 @@ static inline uint8_t in_block(float x, float y)
     return MAP[(int)y*MAP_WIDTH + (int)x];
 }
 
-uint32_t get_color(uint8_t objectType)
+static inline uint32_t get_color(uint8_t objectType)
 {
     uint32_t ret_color = 0xFF000000;
     switch(objectType)
@@ -71,7 +71,7 @@ uint32_t get_color(uint8_t objectType)
     return ret_color;
 }
 
-float dist_2d(float x1, float x2, float y1, float y2)
+static inline float dist_2d(float x1, float x2, float y1, float y2)
 {
     return sqrtf((x2-x1)*(x2-x1)+(y2-y1)*(y2-y1));
 }
@@ -80,7 +80,7 @@ float dist_2d(float x1, float x2, float y1, float y2)
 * x is column on screen, 0 would be far left column
 * h is height of column
 */
-void draw_column(int x1, int x2, int height, uint32_t color)
+static inline void draw_column(int x1, int x2, int height, uint32_t color)
 {
     int original_height = height;
     height = height / RENDER_RES_Y;
@@ -98,7 +98,6 @@ void draw_column(int x1, int x2, int height, uint32_t color)
         }
     }
 }
-
 
 void render()
 {
