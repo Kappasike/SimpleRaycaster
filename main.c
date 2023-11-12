@@ -4,18 +4,20 @@
 #include <SDL.h>
 
 /*** WINDOW WIDTH AND HEIGHT ***/
-#define SCREEN_WIDTH 520
-#define SCREEN_HEIGHT 320
+#define SCREEN_WIDTH 1040
+#define SCREEN_HEIGHT 640
 
 /*** THE SIMULATED RESOLUTION ***/
-#define RES_X 520
-#define RES_Y 320
+#define RES_X 260
+#define RES_Y 160
 
 #define ROT_SPEED 0.14
 #define MOVEMENT_SPEED 0.06
 
 #define MAP_WIDTH 8
 #define MAP_HEIGHT 8
+
+#define DIMNESS 45
 
 const uint16_t RENDER_RES_X = SCREEN_WIDTH / RES_X;
 const uint16_t RENDER_RES_Y = SCREEN_HEIGHT / RES_Y;
@@ -25,7 +27,7 @@ const uint16_t RENDER_SCREEN_WIDTH = SCREEN_WIDTH/RENDER_RES_X;
 static uint8_t MAP[MAP_WIDTH*MAP_HEIGHT] = {
     1, 1, 1, 1, 1, 1, 1, 1,
     1, 0, 0, 1, 1, 0, 0, 1,
-    1, 0, 0, 0, 0, 0, 0, 1,
+    4, 0, 0, 0, 0, 0, 0, 1,
     1, 2, 0, 0, 0, 0, 0, 1,
     1, 0, 0, 0, 0, 1, 0, 1,
     1, 0, 3, 3, 3, 1, 0, 1,
@@ -59,13 +61,25 @@ static inline uint32_t get_color(uint8_t objectType)
     switch(objectType)
     {
         case 1:
-            ret_color = 0xFF0000FF;
+            ret_color = 0xFF0000FF; // red
             break;
         case 2:
-            ret_color = 0xFF00FF00;
+            ret_color = 0xFF00FFFF; // yellow
             break;
         case 3:
-            ret_color = 0xFFFF0000;
+            ret_color = 0xFF00FF00; // green
+            break;
+        case 4:
+            ret_color = 0xFFFFFF00; // light blue
+            break;
+        case 5:
+            ret_color = 0xFFFF0000; // blue
+            break;
+        case 6:
+            ret_color = 0xFFFF00FF; // pink
+            break;
+        case 7:
+            ret_color = 0xFFFFFFFF; // ok
             break;
     }
     return ret_color;
@@ -97,6 +111,10 @@ static inline void draw_column(int x1, int x2, int height, uint32_t color)
             state.pixels[y*SCREEN_WIDTH+i]=color;
         }
     }
+}
+
+uint32_t rotr_c(uint32_t a, uint32_t b) {
+    return (a>>b) | (a<<(32-b));
 }
 
 void render()
@@ -174,7 +192,41 @@ void render()
         // if it's a side then dim the color to create a shading effect
         if(is_side)
         {
-            color = color & 0xFFA8A8A8;
+            uint32_t col = (color >> 16) & 0xFF;
+            if (col >= DIMNESS) {
+                col -= DIMNESS;
+            } else {
+                col = 0;
+            }
+            color = (color & 0xFF00FFFF) | (col << 16);
+            color = rotr_c(color, 8);
+
+            col = (color >> 16) & 0xFF;
+            if (col >= DIMNESS) {
+                col -= DIMNESS;
+            } else {
+                col = 0;
+            }
+            color = (color & 0xFF00FFFF) | (col << 16);
+            color = rotr_c(color, 8);
+            col = (color >> 16) & 0xFF;
+            if (col >= DIMNESS) {
+                col -= DIMNESS;
+            } else {
+                col = 0;
+            }
+            color = (color & 0xFF00FFFF) | (col << 16);
+            color = rotr_c(color, 8);
+            col = (color >> 16) & 0xFF;
+            if (col >= DIMNESS) {
+                col -= DIMNESS;
+            } else {
+                col = 0;
+            }
+            color = (color & 0xFF00FFFF) | (col << 16);
+            color = rotr_c(color, 8);
+
+            //color = color & 0xFFA8A8A8;
         }
 
         // wall has been hit
